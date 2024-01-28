@@ -90,7 +90,7 @@ def get_species(prefix, incomplete, pid, retries, sleep_duration):
 
 def generate_prefixes(levelOfDetail):
     if levelOfDetail <= 0:
-        sys.exit('No...')
+        sys.exit('Ensure that the level of detail is set to a value greater than or equal to 1.')
 
     prefixes = [''.join(prefix) for prefix in itertools.product(string.ascii_lowercase, repeat=levelOfDetail)]
     
@@ -104,9 +104,8 @@ def generate_prefixes(levelOfDetail):
 parser = argparse.ArgumentParser(description='Extract species names from WORMS')
 
 parser.add_argument('-p', '--pid', type=int, help='The PID of the organism cluster', required=True)
-parser.add_argument('-o', '--organism', type=str, help='The organism cluster', required=True)
-parser.add_argument('-l', '--level', type=int, help='The level of detail', default=1)
 parser.add_argument('-d', '--directory', type=str, help='The directory to write the species names file to', required=True)
+parser.add_argument('-l', '--level', type=int, help='The level of detail', default=1)
 parser.add_argument('-t', '--threads', type=int, help='The number of threads to use', default=4)
 parser.add_argument('-r', '--retries', type=int, help='Maximum number of retries for requesting 1 page', default=3)
 parser.add_argument('-s', '--sleep', type=float, help='Sleep duration between retries (in seconds) with exponential backoff', default=2)
@@ -115,7 +114,6 @@ args = parser.parse_args()
 
 # Extract arguments
 pid = args.pid
-org = args.organism
 levelOfDetail = args.level
 directory = args.directory
 threads = args.threads
@@ -127,6 +125,30 @@ sleep_duration = args.sleep
 #######################
 
 prefixes = generate_prefixes(levelOfDetail)
+
+
+#################################
+## FETCH ORGANISM CLUSTER NAME ##
+#################################
+
+# Send a request to WORMS with the specified PID
+url = f'https://www.marinespecies.org/aphia.php?p=taxdetails&id={pid}'
+response = requests.get(url)
+
+# If the status code is not 200, raise an error
+if response.status_code != 200:
+    raise ValueError(f'Failed to establish a connection with WORMS for PID {pid} (Status code: {response.status_code})')
+
+else:
+    # Parse the HTML response using BeautifulSoup
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find the <h3> tag with specific class
+    cluster = soup.find('h3', class_='aphia_core_header-inline')
+
+    # Extract the text
+    cluster = cluster.get_text().strip() if cluster else "Missing Cluster Name"
+
 
 ##############
 ## MESSAGES ##
@@ -142,7 +164,7 @@ print(" _    _  ______________  ___           _            \n\
 
 # Overview message
 print('\033[1mDETAILS\n-------\033[0m')
-print(f'\033[1mOrganism Cluster:\033[0m {org}')
+print(f'\033[1mOrganism Cluster:\033[0m {cluster}')
 print(f'\033[1mPID:\033[0m {pid}')
 print(f'\033[1mLevel of Detail:\033[0m {levelOfDetail}')
 print(f'\033[1mMaximum Retries:\033[0m {retries}')
@@ -160,7 +182,7 @@ print('\033[1mPROGRESS\n--------\033[0m')
 all_species_names = []
 incomplete = []
 
-with open(f'{directory}/marine{org}.txt', 'w') as file:
+with open(f'{directory}/marine{"".join(cluster.split())}.txt', 'w') as file:
 
     # Use multithreading to send multiple requests to WORMS at the same time 
     with ThreadPoolExecutor(max_workers=threads) as executor:
@@ -185,6 +207,12 @@ with open(f'{directory}/marine{org}.txt', 'w') as file:
                 
                 sys.exit()
 
+    # Remove all values that say et al.
+    all_species_names = [name for name in all_species_names if name != 'et al.']
+
+    # Count all organism names before removing duplicates
+    species_names_amount_with_duplicates = len(all_species_names)
+
     # Convert the list to a set to remove duplicates
     all_species_names = list(set(all_species_names))
 
@@ -193,7 +221,7 @@ with open(f'{directory}/marine{org}.txt', 'w') as file:
 
     # Print summary messages
     print('\033[1m\nSUMMARY\n-------\033[0m')
-    print(f'\033[1mAmount:\033[0m {len(all_species_names)} unique species\n\033[1mFile:\033[0m {directory}/marine{org}.txt')
+    print(f'\033[1mAmount:\033[0m {species_names_amount_with_duplicates} names extracted\n\033[1mAmount:\033[0m {len(all_species_names)} unique species\n\033[1mFile:\033[0m {directory}/marine{"".join(cluster.split())}.txt')
     
     if len(incomplete) != 0:
         print(f'\033[1mPrefixes with too many species to extract:\033[0m {incomplete}')
